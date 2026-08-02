@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Pocket Film — Free Pro Camera</title>
+  <meta name="description" content="A free, private, film-look pro camera. Every feature unlocked. Nothing collected, nothing stored, nothing shared." />
+  <meta name="theme-color" content="#111114" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Pocket Film" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ================= Viewfinder ================= -->
+    <main id="viewfinder">
+      <video id="video" autoplay playsinline muted></video>
+      <div id="grain-overlay" aria-hidden="true"></div>
+      <div id="vignette-overlay" aria-hidden="true"></div>
+      <div id="flash-overlay" aria-hidden="true"></div>
+
+      <div id="topbar">
+        <button id="btn-settings" class="chip-btn" title="About &amp; privacy">ⓘ</button>
+        <div id="look-name" class="look-name">Natural</div>
+        <button id="btn-grid" class="chip-btn" title="Toggle grid">▦</button>
+      </div>
+
+      <div id="grid-overlay" class="hidden" aria-hidden="true">
+        <div class="gv" style="left:33.33%"></div>
+        <div class="gv" style="left:66.66%"></div>
+        <div class="gh" style="top:33.33%"></div>
+        <div class="gh" style="top:66.66%"></div>
+      </div>
+
+      <div id="camera-error" class="hidden">
+        <div class="err-card">
+          <h2>Camera unavailable</h2>
+          <p id="camera-error-msg">Allow camera access to start shooting. Nothing ever leaves your device.</p>
+          <button id="btn-retry" class="pill">Try again</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ================= Control deck ================= -->
+    <section id="deck">
+
+      <!-- Film look selector -->
+      <div id="looks" class="looks" role="tablist" aria-label="Film looks"></div>
+
+      <!-- Pro dials (collapsible) -->
+      <div id="pro-panel" class="pro-panel hidden">
+        <div class="dial-row" id="dial-row"></div>
+      </div>
+
+      <!-- Main action row -->
+      <div id="actions">
+        <button id="btn-thumb" class="thumb" title="Last photo">
+          <img id="thumb-img" alt="" />
+        </button>
+        <button id="btn-shutter" title="Take photo" aria-label="Take photo">
+          <span class="shutter-inner"></span>
+        </button>
+        <div class="right-stack">
+          <button id="btn-pro" class="chip-btn" title="Pro controls">✚</button>
+          <button id="btn-flip" class="chip-btn" title="Flip camera">⟲</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Photo review ================= -->
+    <section id="review" class="sheet hidden">
+      <div class="sheet-top">
+        <button id="btn-review-close" class="pill ghost">Back</button>
+        <div class="sheet-title">Your photo</div>
+        <button id="btn-review-delete" class="pill ghost danger">Delete</button>
+      </div>
+      <div class="review-img-wrap"><img id="review-img" alt="Captured photo" /></div>
+      <div class="sheet-actions">
+        <button id="btn-save" class="pill big">Save / Share</button>
+      </div>
+      <p class="hint">On iPhone: tap Save / Share → “Save Image” to add it to your Photos.</p>
+    </section>
+
+    <!-- ================= About ================= -->
+    <section id="about" class="sheet hidden">
+      <div class="sheet-top">
+        <button id="btn-about-close" class="pill ghost">Close</button>
+        <div class="sheet-title">Pocket Film</div>
+        <span style="width:64px"></span>
+      </div>
+      <div class="about-body">
+        <h1>100% free.<br/>100% private.</h1>
+        <p>Every look, every dial, every feature — unlocked. No subscriptions, no in‑app purchases, no accounts.</p>
+        <p>We collect nothing. We store nothing. We share nothing. All processing happens on your device; photos only go where <em>you</em> send them.</p>
+        <h3>Tips</h3>
+        <ul>
+          <li>Add to Home Screen (Share → “Add to Home Screen”) for a full-screen, app-like experience that works offline.</li>
+          <li>Pick a film look, then tap ✚ to fine‑tune exposure, warmth, grain, halation and more.</li>
+          <li>Photos are processed at capture with real film-style tone curves, grain and halation — not just a live filter.</li>
+        </ul>
+      </div>
+    </section>
+
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
