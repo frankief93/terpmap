@@ -117,8 +117,28 @@ final class CameraManager: NSObject, ObservableObject {
         }
 
         session.commitConfiguration()
+        updateConnections(front: false)
         refreshOutputDimensions()
         refreshCapabilities()
+    }
+
+    /// Portrait-lock both outputs; mirror the preview (never the photo) for the front camera.
+    /// Connections only exist after commitConfiguration, so call this after every commit.
+    private func updateConnections(front: Bool) {
+        for connection in [videoOutput.connection(with: .video), photoOutput.connection(with: .video)] {
+            guard let connection else { continue }
+            if connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+        }
+        if let preview = videoOutput.connection(with: .video) {
+            preview.automaticallyAdjustsVideoMirroring = false
+            preview.isVideoMirrored = front
+        }
+        if let photo = photoOutput.connection(with: .video) {
+            photo.automaticallyAdjustsVideoMirroring = false
+            photo.isVideoMirrored = false
+        }
     }
 
     // MARK: - Device selection
@@ -167,8 +187,14 @@ final class CameraManager: NSObject, ObservableObject {
 
     private func refreshOutputDimensions() {
         guard let device else { return }
-        if let biggest = device.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width * $0.height < $1.width * $1.height }) {
-            photoOutput.maxPhotoDimensions = biggest
+        let dims = device.activeFormat.supportedMaxPhotoDimensions
+        // Balanced default: largest option up to ~24MP. 48MP HEICs take seconds to
+        // filter and encode; worth a settings toggle later, not the default.
+        let balanced = dims
+            .filter { Int64($0.width) * Int64($0.height) <= 26_000_000 }
+            .max { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) }
+        if let pick = balanced ?? dims.first {
+            photoOutput.maxPhotoDimensions = pick
         }
     }
 
@@ -206,6 +232,7 @@ final class CameraManager: NSObject, ObservableObject {
             self.session.beginConfiguration()
             self.attachDevice(position: .back, lens: newLens)
             self.session.commitConfiguration()
+            self.updateConnections(front: false)
             self.refreshOutputDimensions()
             self.refreshCapabilities()
             self.reapplyManualSettings()
@@ -221,6 +248,7 @@ final class CameraManager: NSObject, ObservableObject {
             self.session.beginConfiguration()
             self.attachDevice(position: toFront ? .front : .back, lens: self.lens)
             self.session.commitConfiguration()
+            self.updateConnections(front: toFront)
             self.refreshOutputDimensions()
             self.refreshCapabilities()
         }
@@ -343,14 +371,12 @@ final class CameraManager: NSObject, ObservableObject {
         var look: FilmLook
         var rawData: Data?
         var processedData: Data?
-        var frontCamera: Bool
     }
 
     func capturePhoto(look: FilmLook) {
         guard !isCapturing else { return }
         isCapturing = true
-        let front = isFrontCamera
-        let wantRaw = naturalMode && rawAvailable && !front
+        let wantRaw = naturalMode && rawAvailable && !isFrontCamera
         let flash = flashMode
 
         sessionQueue.async { [weak self] in
@@ -374,8 +400,7 @@ final class CameraManager: NSObject, ObservableObject {
             if self.photoOutput.supportedFlashModes.contains(flash) {
                 settings.flashMode = flash
             }
-            let lookSnapshot = DispatchQueue.main.sync { LookStore.shared.effectiveLook }
-            self.inFlightCaptures[settings.uniqueID] = CaptureContext(look: lookSnapshot, frontCamera: front)
+            self.inFlightCaptures[settings.uniqueID] = CaptureContext(look: look)
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -407,10 +432,11 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      error: Error?) {
         let id = resolvedSettings.uniqueID
         sessionQueue.async { [weak self] in
-            guard let self, let ctx = self.inFlightCaptures.removeValue(forKey: id) else {
-                DispatchQueue.main.async { self?.isCapturing = false }
-                return
-            }
+            guard let self else { return }
+            let ctx = self.inFlightCaptures.removeValue(forKey: id)
+            // Re-arm the shutter as soon as the sensor is done; processing continues below.
+            DispatchQueue.main.async { self.isCapturing = false }
+            guard let ctx else { return }
             DispatchQueue.global(qos: .userInitiated).async {
                 self.finishCapture(ctx)
             }
@@ -418,10 +444,9 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     }
 
     private func finishCapture(_ ctx: CaptureContext) {
-        defer { DispatchQueue.main.async { self.isCapturing = false } }
         guard let processed = ctx.processedData else { return }
 
-        let styled = PhotoProcessor.applyLook(ctx.look, toImageData: processed, mirror: ctx.frontCamera)
+        let styled = PhotoProcessor.applyLook(ctx.look, toImageData: processed)
         let finalData = styled ?? processed
 
         PhotoLibrarySaver.save(processedData: finalData, rawData: ctx.rawData) { [weak self] success, error in

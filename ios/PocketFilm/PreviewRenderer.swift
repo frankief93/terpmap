@@ -9,16 +9,14 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
     private let renderQueue = DispatchQueue(label: "pocketfilm.preview")
     private(set) var currentImage: CIImage?
     var look: FilmLook = FilmLook.all[0]
-    var mirrored = false
     weak var mtkView: MTKView?
+
+    /// Long edge of the preview image fed through the filter chain. Filtering at
+    /// full sensor resolution 30x/second is what makes a live preview crawl.
+    private let previewMaxEdge: CGFloat = 1600
 
     func attach(to output: AVCaptureVideoDataOutput) {
         output.setSampleBufferDelegate(self, queue: renderQueue)
-        if let connection = output.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90   // portrait
-            }
-        }
     }
 
     func captureOutput(_ output: AVCaptureOutput,
@@ -26,8 +24,10 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
                        from connection: AVCaptureConnection) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvPixelBuffer: buffer)
-        if mirrored {
-            image = image.oriented(.upMirrored)
+        let longEdge = max(image.extent.width, image.extent.height)
+        if longEdge > previewMaxEdge {
+            let s = previewMaxEdge / longEdge
+            image = image.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
         currentImage = LookEngine.shared.apply(look, to: image, forPreview: true)
         DispatchQueue.main.async { [weak self] in
@@ -90,7 +90,13 @@ struct MetalPreviewView: UIViewRepresentable {
             let originY = (scaled.extent.height - drawableSize.height) / 2 + scaled.extent.origin.y
             let cropped = scaled.cropped(to: CGRect(x: originX, y: originY,
                                                     width: drawableSize.width, height: drawableSize.height))
-            let positioned = cropped.transformed(by: CGAffineTransform(translationX: -originX, y: -originY))
+            var positioned = cropped.transformed(by: CGAffineTransform(translationX: -originX, y: -originY))
+
+            // Core Image renders with a bottom-left origin; Metal textures are
+            // top-left. Flip vertically or the preview draws upside down.
+            positioned = positioned
+                .transformed(by: CGAffineTransform(scaleX: 1, y: -1)
+                    .concatenating(CGAffineTransform(translationX: 0, y: drawableSize.height)))
 
             ciContext.render(positioned,
                              to: drawable.texture,

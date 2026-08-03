@@ -172,11 +172,16 @@ final class LookEngine {
         clamp.maxComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
         guard let highlights = clamp.outputImage else { return image }
 
-        // Blur radius scales with image size; warm the glow toward red/orange.
-        let radius = image.extent.width / 120.0 * (0.5 + look.halation)
-        let blurred = highlights
+        // Blur at quarter resolution — the glow is soft by definition, and a
+        // full-res Gaussian on a 24MP frame costs seconds for zero visible gain.
+        let ds: CGFloat = 0.25
+        let small = highlights.transformed(by: CGAffineTransform(scaleX: ds, y: ds))
+        let radius = small.extent.width / 120.0 * (0.5 + look.halation)
+        let blurred = small
             .clampedToExtent()
             .applyingGaussianBlur(sigma: radius)
+            .cropped(to: small.extent)
+            .transformed(by: CGAffineTransform(scaleX: 1 / ds, y: 1 / ds))
             .cropped(to: image.extent)
 
         let warm = CIFilter.colorMatrix()

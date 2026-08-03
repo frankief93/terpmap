@@ -12,11 +12,8 @@ enum PhotoProcessor {
     ])
 
     /// Returns styled HEIF/JPEG data, or nil to fall back to the original.
-    static func applyLook(_ look: FilmLook, toImageData data: Data, mirror: Bool) -> Data? {
-        guard var image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
-        if mirror {
-            image = image.oriented(.upMirrored)
-        }
+    static func applyLook(_ look: FilmLook, toImageData data: Data) -> Data? {
+        guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
         let styled = LookEngine.shared.apply(look, to: image)
 
         guard let cgImage = context.createCGImage(

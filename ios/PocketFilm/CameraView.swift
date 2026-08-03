@@ -199,7 +199,6 @@ struct CameraView: View {
                     }
                     Button {
                         camera.flipCamera()
-                        pipeline.mirrored = !camera.isFrontCamera ? false : true
                         Haptics.tap()
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath.camera").chipStyle()
