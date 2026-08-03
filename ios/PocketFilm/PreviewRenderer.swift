@@ -23,6 +23,11 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
         set { stateLock.lock(); _look = newValue; stateLock.unlock() }
     }
 
+    // Coalesce redraw requests: during app launch the main thread is busy and
+    // per-frame setNeedsDisplay calls pile into a backlog that plays out as a
+    // slideshow. One pending request at a time is enough.
+    private var displayRequestPending = false
+
     weak var mtkView: MTKView?
 
     /// Long edge of the preview image fed through the filter chain. Filtering at
@@ -44,9 +49,16 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
             image = image.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
         let rendered = LookEngine.shared.apply(look, to: image, forPreview: true)
-        stateLock.lock(); _currentImage = rendered; stateLock.unlock()
+        stateLock.lock()
+        _currentImage = rendered
+        let shouldRequest = !displayRequestPending
+        displayRequestPending = true
+        stateLock.unlock()
+        guard shouldRequest else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.mtkView?.setNeedsDisplay()
+            guard let self else { return }
+            self.stateLock.lock(); self.displayRequestPending = false; self.stateLock.unlock()
+            self.mtkView?.setNeedsDisplay()
         }
     }
 }
@@ -87,6 +99,16 @@ struct MetalPreviewView: UIViewRepresentable {
                 self.ciContext = CIContext()
             }
             super.init()
+
+            // Warm up: run the full filter chain (halation included) through this
+            // context on a dummy image so the GPU kernels compile now, not during
+            // the first seconds of live preview.
+            let context = ciContext
+            DispatchQueue.global(qos: .userInitiated).async {
+                let dummy = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+                let warmed = LookEngine.shared.apply(FilmLook.all[1], to: dummy)
+                _ = context.createCGImage(warmed, from: warmed.extent)
+            }
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
