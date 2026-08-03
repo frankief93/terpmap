@@ -1,0 +1,271 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B00000000000000000000001 /* PocketFilmApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001 /* PocketFilmApp.swift */; };
+		B00000000000000000000002 /* FilmLook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* FilmLook.swift */; };
+		B00000000000000000000003 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* CameraManager.swift */; };
+		B00000000000000000000004 /* PhotoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* PhotoProcessor.swift */; };
+		B00000000000000000000005 /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000005 /* PhotoLibrarySaver.swift */; };
+		B00000000000000000000006 /* LookStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000006 /* LookStore.swift */; };
+		B00000000000000000000007 /* PreviewRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000007 /* PreviewRenderer.swift */; };
+		B00000000000000000000008 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000008 /* CameraView.swift */; };
+		B00000000000000000000009 /* ManualPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000009 /* ManualPanel.swift */; };
+		B0000000000000000000000A /* ReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* ReviewSheet.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A00000000000000000000001 /* PocketFilmApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketFilmApp.swift; sourceTree = "<group>"; };
+		A00000000000000000000002 /* FilmLook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmLook.swift; sourceTree = "<group>"; };
+		A00000000000000000000003 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
+		A00000000000000000000004 /* PhotoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoProcessor.swift; sourceTree = "<group>"; };
+		A00000000000000000000005 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
+		A00000000000000000000006 /* LookStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LookStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000007 /* PreviewRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewRenderer.swift; sourceTree = "<group>"; };
+		A00000000000000000000008 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
+		A00000000000000000000009 /* ManualPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualPanel.swift; sourceTree = "<group>"; };
+		A0000000000000000000000A /* ReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSheet.swift; sourceTree = "<group>"; };
+		A0000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A0000000000000000000000F /* PocketFilm.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketFilm.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C00000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D00000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000003 /* PocketFilm */,
+				D00000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D00000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000F /* PocketFilm.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000003 /* PocketFilm */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000001 /* PocketFilmApp.swift */,
+				A00000000000000000000008 /* CameraView.swift */,
+				A00000000000000000000009 /* ManualPanel.swift */,
+				A0000000000000000000000A /* ReviewSheet.swift */,
+				A00000000000000000000003 /* CameraManager.swift */,
+				A00000000000000000000007 /* PreviewRenderer.swift */,
+				A00000000000000000000002 /* FilmLook.swift */,
+				A00000000000000000000006 /* LookStore.swift */,
+				A00000000000000000000004 /* PhotoProcessor.swift */,
+				A00000000000000000000005 /* PhotoLibrarySaver.swift */,
+				A0000000000000000000000B /* Info.plist */,
+			);
+			path = PocketFilm;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E00000000000000000000001 /* PocketFilm */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F00000000000000000000002 /* Build configuration list for PBXNativeTarget "PocketFilm" */;
+			buildPhases = (
+				C00000000000000000000001 /* Sources */,
+				C00000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PocketFilm;
+			productName = PocketFilm;
+			productReference = A0000000000000000000000F /* PocketFilm.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E00000000000000000000002 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					E00000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = F00000000000000000000001 /* Build configuration list for PBXProject "PocketFilm" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D00000000000000000000001;
+			productRefGroup = D00000000000000000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E00000000000000000000001 /* PocketFilm */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C00000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* PocketFilmApp.swift in Sources */,
+				B00000000000000000000002 /* FilmLook.swift in Sources */,
+				B00000000000000000000003 /* CameraManager.swift in Sources */,
+				B00000000000000000000004 /* PhotoProcessor.swift in Sources */,
+				B00000000000000000000005 /* PhotoLibrarySaver.swift in Sources */,
+				B00000000000000000000006 /* LookStore.swift in Sources */,
+				B00000000000000000000007 /* PreviewRenderer.swift in Sources */,
+				B00000000000000000000008 /* CameraView.swift in Sources */,
+				B00000000000000000000009 /* ManualPanel.swift in Sources */,
+				B0000000000000000000000A /* ReviewSheet.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		F00000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F00000000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F00000000000000000000021 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PocketFilm/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pocketfilm.camera;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		F00000000000000000000022 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PocketFilm/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pocketfilm.camera;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F00000000000000000000001 /* Build configuration list for PBXProject "PocketFilm" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00000000000000000000011 /* Debug */,
+				F00000000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F00000000000000000000002 /* Build configuration list for PBXNativeTarget "PocketFilm" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F00000000000000000000021 /* Debug */,
+				F00000000000000000000022 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E00000000000000000000002 /* Project object */;
+}

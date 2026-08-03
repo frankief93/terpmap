@@ -1,5 +1,7 @@
 # Pocket Film 📷
 
+> **Native iOS app now in [`ios/`](ios/)** — a real SwiftUI + AVFoundation camera with manual shutter/ISO/WB/focus, 48MP capture, RAW (DNG) pairing, and film looks rendered live on the viewfinder. See [`ios/SETUP.md`](ios/SETUP.md) to build it with Xcode. The web app below still works as the zero-install version.
+
 A free, private, film-look pro camera that runs entirely in your browser. Every feature unlocked — no subscriptions, no in-app purchases, no accounts.
 
 **We collect nothing. We store nothing. We share nothing.** All photo processing happens on your device.
