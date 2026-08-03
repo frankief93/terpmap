@@ -24,10 +24,21 @@ enum PhotoProcessor {
         ) else { return nil }
 
         // Carry the original metadata across, minus the orientation (now baked in).
+        // The nested TIFF/EXIF copies must be scrubbed too, or strict readers
+        // rotate the already-rotated pixels again.
         var properties = originalProperties(from: data)
         properties[kCGImagePropertyOrientation as String] = 1
         properties.removeValue(forKey: kCGImagePropertyPixelWidth as String)
         properties.removeValue(forKey: kCGImagePropertyPixelHeight as String)
+        if var tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] {
+            tiff[kCGImagePropertyTIFFOrientation as String] = 1
+            properties[kCGImagePropertyTIFFDictionary as String] = tiff
+        }
+        if var exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] {
+            exif.removeValue(forKey: kCGImagePropertyExifPixelXDimension as String)
+            exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension as String)
+            properties[kCGImagePropertyExifDictionary as String] = exif
+        }
 
         let out = NSMutableData()
         let type = UTType.heic.identifier as CFString

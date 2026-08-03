@@ -70,18 +70,20 @@ struct ManualPanel: View {
                         display: String(format: "%+.0f", camera.wbTint)) { camera.applyWhiteBalance() }
             }
 
-            Toggle(isOn: $camera.manualFocus) {
-                Label("Manual focus", systemImage: "scope").font(.footnote)
-            }
-            .tint(.orange)
-            .padding(.horizontal, 16)
-            .onChange(of: camera.manualFocus) { camera.applyFocus() }
+            if camera.supportsManualFocus {
+                Toggle(isOn: $camera.manualFocus) {
+                    Label("Manual focus", systemImage: "scope").font(.footnote)
+                }
+                .tint(.orange)
+                .padding(.horizontal, 16)
+                .onChange(of: camera.manualFocus) { camera.applyFocus() }
 
-            if camera.manualFocus {
-                DialRow(label: "Focus", value: $camera.focusPosition, range: 0...1,
-                        display: camera.focusPosition < 0.15 ? "NEAR" :
-                                 camera.focusPosition > 0.85 ? "FAR" :
-                                 String(format: "%.2f", camera.focusPosition)) { camera.applyFocus() }
+                if camera.manualFocus {
+                    DialRow(label: "Focus", value: $camera.focusPosition, range: 0...1,
+                            display: camera.focusPosition < 0.15 ? "NEAR" :
+                                     camera.focusPosition > 0.85 ? "FAR" :
+                                     String(format: "%.2f", camera.focusPosition)) { camera.applyFocus() }
+                }
             }
         }
     }
@@ -142,6 +144,19 @@ struct ManualPanel: View {
             }
             .tint(.orange)
             .padding(.horizontal, 16)
+
+            Toggle(isOn: $camera.fullResolution) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Full resolution (48MP)", systemImage: "sparkles.rectangle.stack")
+                        .font(.footnote.weight(.semibold))
+                    Text("Maximum detail. Slower per shot, much bigger files.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .tint(.orange)
+            .padding(.horizontal, 16)
+            .onChange(of: camera.fullResolution) { camera.applyResolution() }
 
             Text("Off = full Apple computational pipeline (Smart HDR, fusion). On = closer to a single, honest exposure.")
                 .font(.caption2)

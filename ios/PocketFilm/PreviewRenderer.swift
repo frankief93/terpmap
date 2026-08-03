@@ -7,8 +7,22 @@ import SwiftUI
 final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     private let renderQueue = DispatchQueue(label: "pocketfilm.preview")
-    private(set) var currentImage: CIImage?
-    var look: FilmLook = FilmLook.all[0]
+    private let stateLock = NSLock()
+
+    // currentImage is written on renderQueue and read on main (draw); look is the
+    // reverse. Both go through the lock — unsynchronized access is a real race.
+    private var _currentImage: CIImage?
+    var currentImage: CIImage? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return _currentImage
+    }
+
+    private var _look: FilmLook = FilmLook.all[0]
+    var look: FilmLook {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _look }
+        set { stateLock.lock(); _look = newValue; stateLock.unlock() }
+    }
+
     weak var mtkView: MTKView?
 
     /// Long edge of the preview image fed through the filter chain. Filtering at
@@ -29,7 +43,8 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
             let s = previewMaxEdge / longEdge
             image = image.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
-        currentImage = LookEngine.shared.apply(look, to: image, forPreview: true)
+        let rendered = LookEngine.shared.apply(look, to: image, forPreview: true)
+        stateLock.lock(); _currentImage = rendered; stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
             self?.mtkView?.setNeedsDisplay()
         }

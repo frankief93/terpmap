@@ -32,6 +32,17 @@ enum PhotoLibrarySaver {
         }
     }
 
+    /// Salvage path: the processed photo failed but the DNG exists — save it alone.
+    static func saveRawOnly(_ rawData: Data, completion: @escaping (Bool, String?) -> Void) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                completion(false, "Photos access denied. Enable it in Settings > PocketFilm.")
+                return
+            }
+            saveSingle(data: rawData, type: .dng, resourceType: .photo, completion: completion)
+        }
+    }
+
     private static func savePaired(processedData: Data, rawData: Data?, completion: @escaping (Bool, String?) -> Void) {
         let stamp = Int(Date().timeIntervalSince1970)
         PHPhotoLibrary.shared().performChanges({

@@ -1,5 +1,6 @@
 import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Swipeable gallery of every photo taken this session. All shots are already
 /// saved to the Photos library the moment they're taken — this is a quick look.
@@ -21,7 +22,7 @@ struct ReviewSheet: View {
                 } else {
                     TabView(selection: $selection) {
                         ForEach(camera.captures) { capture in
-                            PhotoPage(data: capture.data)
+                            PhotoPage(url: capture.url)
                                 .tag(Optional(capture.id))
                         }
                     }
@@ -41,7 +42,7 @@ struct ReviewSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if let current {
-                        ShareLink(item: PhotoTransfer(data: current.data),
+                        ShareLink(item: PhotoTransfer(url: current.url),
                                   preview: SharePreview("PocketFilm photo",
                                                         image: Image(uiImage: current.thumbnail)))
                     }
@@ -54,9 +55,9 @@ struct ReviewSheet: View {
     }
 }
 
-/// One zoomable-later photo page, decoded at display size to keep memory sane.
+/// One photo page, decoded from its temp file at display size to keep memory sane.
 private struct PhotoPage: View {
-    let data: Data
+    let url: URL
     @State private var image: UIImage?
 
     var body: some View {
@@ -68,29 +69,30 @@ private struct PhotoPage: View {
             }
         }
         .task {
-            image = await Self.decode(data, maxPixels: 2400)
+            image = await Self.decode(url, maxPixels: 2400)
         }
     }
 
-    private static func decode(_ data: Data, maxPixels: CGFloat) async -> UIImage? {
+    private static func decode(_ url: URL, maxPixels: CGFloat) async -> UIImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            kCGImageSourceShouldCache: false,
         ]
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-        else { return UIImage(data: data) }
+        else { return nil }
         return UIImage(cgImage: cg)
     }
 }
 
-/// Wraps HEIC data so ShareLink can hand the actual file to the share sheet.
+/// Hands the HEIC file itself to the share sheet.
 struct PhotoTransfer: Transferable {
-    let data: Data
+    let url: URL
 
     static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .heic) { $0.data }
+        FileRepresentation(exportedContentType: .heic) { SentTransferredFile($0.url) }
             .suggestedFileName("PocketFilm.heic")
     }
 }

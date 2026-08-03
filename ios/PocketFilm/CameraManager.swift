@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import ImageIO
 import UIKit
 
 /// Owns the AVCaptureSession, device configuration, manual controls, and photo capture.
@@ -26,13 +27,29 @@ final class CameraManager: NSObject, ObservableObject {
 
     struct Capture: Identifiable {
         let id = UUID()
-        let data: Data
+        let url: URL
         let thumbnail: UIImage
+    }
+
+    override init() {
+        super.init()
+        // Session shots live in a temp dir (Photos has the real copies); clear leftovers.
+        if let files = try? FileManager.default.contentsOfDirectory(at: Self.sessionDirectory,
+                                                                    includingPropertiesForKeys: nil) {
+            for file in files { try? FileManager.default.removeItem(at: file) }
+        }
     }
 
     // Natural mode: Bayer RAW DNG + fast minimally-processed HEIF, saved as a pair.
     @Published var naturalMode = true
     @Published var rawAvailable = false
+
+    // Full sensor resolution (48MP where supported). Slower per shot, bigger files.
+    @Published var fullResolution = false
+
+    func applyResolution() {
+        sessionQueue.async { [weak self] in self?.refreshOutputDimensions() }
+    }
 
     // Manual exposure. When `manualExposure` is false the device runs full auto.
     @Published var manualExposure = false
@@ -44,6 +61,7 @@ final class CameraManager: NSObject, ObservableObject {
     @Published var wbTint: Double = 0
     @Published var manualFocus = false
     @Published var focusPosition: Double = 0.5  // 0 = near, 1 = far
+    @Published var supportsManualFocus = true   // fixed-focus front cameras can't
 
     // Device capability ranges, refreshed on device switch.
     @Published var isoRange: ClosedRange<Double> = 34...3000
@@ -114,6 +132,12 @@ final class CameraManager: NSObject, ObservableObject {
             session.addOutput(photoOutput)
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
+        // iOS 17+ responsive-capture stack: ring-buffer zero shutter lag, overlapped
+        // capture/processing, and adaptive pacing under rapid fire. Order matters —
+        // each tier requires the previous one.
+        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
+        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
+        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
 
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -127,13 +151,23 @@ final class CameraManager: NSObject, ObservableObject {
         refreshCapabilities()
     }
 
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+
     /// Portrait-lock both outputs; mirror the preview (never the photo) for the front camera.
     /// Connections only exist after commitConfiguration, so call this after every commit.
     private func updateConnections(front: Bool) {
+        // Ask the device for its portrait angle instead of hardcoding 90 — front
+        // sensors on newer hardware (iPhone 17 era) are mounted differently.
+        var angle: CGFloat = 90
+        if let device {
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+            rotationCoordinator = coordinator
+            angle = coordinator.videoRotationAngleForHorizonLevelCapture
+        }
         for connection in [videoOutput.connection(with: .video), photoOutput.connection(with: .video)] {
             guard let connection else { continue }
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
             }
         }
         if let preview = videoOutput.connection(with: .video) {
@@ -180,25 +214,34 @@ final class CameraManager: NSObject, ObservableObject {
             return
         }
 
-        // Prefer the format supporting the largest still (48MP on the 15 Plus main camera).
+        // Always set zoom explicitly: 1x and 2x share the same physical device, and
+        // videoZoomFactor persists across input swaps — without this, leaving 2x
+        // stays silently zoomed.
         do {
             try device.lockForConfiguration()
-            if lens == .tele2x {
-                device.videoZoomFactor = min(2.0, device.activeFormat.videoMaxZoomFactor)
-            }
+            let target: CGFloat = (lens == .tele2x && position == .back)
+                ? min(2.0, device.activeFormat.videoMaxZoomFactor)
+                : 1.0
+            device.videoZoomFactor = target
             device.unlockForConfiguration()
+            DispatchQueue.main.async { self.zoom = Double(target) }
         } catch { }
     }
 
     private func refreshOutputDimensions() {
         guard let device else { return }
         let dims = device.activeFormat.supportedMaxPhotoDimensions
-        // Balanced default: largest option up to ~24MP. 48MP HEICs take seconds to
-        // filter and encode; worth a settings toggle later, not the default.
-        let balanced = dims
-            .filter { Int64($0.width) * Int64($0.height) <= 26_000_000 }
-            .max { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) }
-        if let pick = balanced ?? dims.first {
+        func pixels(_ d: CMVideoDimensions) -> Int64 { Int64(d.width) * Int64(d.height) }
+        let pick: CMVideoDimensions?
+        if fullResolution {
+            pick = dims.max { pixels($0) < pixels($1) }
+        } else {
+            // Balanced default: largest option up to ~24MP. 48MP HEICs take
+            // noticeably longer to filter and encode.
+            pick = dims.filter { pixels($0) <= 26_000_000 }.max { pixels($0) < pixels($1) }
+                ?? dims.min { pixels($0) < pixels($1) }
+        }
+        if let pick {
             photoOutput.maxPhotoDimensions = pick
         }
     }
@@ -211,12 +254,15 @@ final class CameraManager: NSObject, ObservableObject {
         let maxDur = min(format.maxExposureDuration.seconds, 1.0)
         let rawTypes = photoOutput.availableRawPhotoPixelFormatTypes
         let lenses = availableBackLenses()
+        let manualFocusOK = device.isLockingFocusWithCustomLensPositionSupported
         DispatchQueue.main.async {
             self.isoRange = minISO...maxISO
             self.shutterRange = minDur...maxDur
             self.maxZoom = min(Double(format.videoMaxZoomFactor), 10)
             self.rawAvailable = !rawTypes.isEmpty
             self.availableLenses = self.isFrontCamera ? [.wide] : lenses
+            self.supportsManualFocus = manualFocusOK
+            if !manualFocusOK { self.manualFocus = false }
         }
     }
 
@@ -226,7 +272,12 @@ final class CameraManager: NSObject, ObservableObject {
             lenses.append(.ultraWide)
         }
         lenses.append(.wide)
-        lenses.append(.tele2x)   // digital 2x crop on the 48MP sensor
+        // 2x is only a quality crop when the main sensor is 48MP-class; on 12MP
+        // mains it would be a mushy ~3MP digital zoom, so hide it there.
+        if let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+           wide.activeFormat.supportedMaxPhotoDimensions.contains(where: { $0.width >= 7000 }) {
+            lenses.append(.tele2x)
+        }
         return lenses
     }
 
@@ -256,6 +307,7 @@ final class CameraManager: NSObject, ObservableObject {
             self.updateConnections(front: toFront)
             self.refreshOutputDimensions()
             self.refreshCapabilities()
+            self.reapplyManualSettings()
         }
     }
 
@@ -386,8 +438,12 @@ final class CameraManager: NSObject, ObservableObject {
 
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            // Bayer RAW requires zoom to be exactly 1.0 — the SDK throws otherwise.
+            // When zoomed (2x chip or pinch), quietly fall back to processed-only.
+            let zoomNeutral = (self.device?.videoZoomFactor ?? 1) == 1
+            let useRaw = wantRaw && zoomNeutral
             let settings: AVCapturePhotoSettings
-            if wantRaw, let rawType = self.photoOutput.availableRawPhotoPixelFormatTypes.first {
+            if useRaw, let rawType = self.photoOutput.availableRawPhotoPixelFormatTypes.first {
                 if self.photoOutput.availablePhotoCodecTypes.contains(.hevc) {
                     settings = AVCapturePhotoSettings(rawPixelFormatType: rawType,
                                                       processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc])
@@ -449,10 +505,24 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     }
 
     private func finishCapture(_ ctx: CaptureContext) {
-        guard let processed = ctx.processedData else { return }
+        guard let processed = ctx.processedData else {
+            // The HEIF leg failed; salvage the RAW so the shot isn't lost.
+            if let raw = ctx.rawData {
+                PhotoLibrarySaver.saveRawOnly(raw) { [weak self] success, error in
+                    DispatchQueue.main.async {
+                        if !success { self?.errorMessage = error ?? "Could not save RAW to Photos." }
+                    }
+                }
+            }
+            return
+        }
 
         let styled = PhotoProcessor.applyLook(ctx.look, toImageData: processed)
         let finalData = styled ?? processed
+        // Thumbnail + temp file happen here, off the main thread; the gallery keeps
+        // only a URL and a small thumbnail in memory, never full-res data.
+        let thumbnail = Self.downsampledImage(finalData, maxPixel: 400)
+        let fileURL = Self.writeSessionFile(finalData)
 
         PhotoLibrarySaver.save(processedData: finalData, rawData: ctx.rawData) { [weak self] success, error in
             DispatchQueue.main.async {
@@ -460,15 +530,38 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                 if !success {
                     self.errorMessage = error ?? "Could not save to Photos."
                 }
-                if let image = UIImage(data: finalData) {
-                    let thumb = image.preparingThumbnail(of: CGSize(width: 400, height: 400)) ?? image
-                    self.captures.append(Capture(data: finalData, thumbnail: thumb))
+                if let thumbnail, let fileURL {
+                    self.captures.append(Capture(url: fileURL, thumbnail: thumbnail))
                     if self.captures.count > 50 {
                         self.captures.removeFirst(self.captures.count - 50)
                     }
-                    self.onPhotoSaved?(image)
+                    self.onPhotoSaved?(thumbnail)
                 }
             }
         }
+    }
+
+    static let sessionDirectory: URL = {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PocketFilmSession", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    private static func writeSessionFile(_ data: Data) -> URL? {
+        let url = sessionDirectory.appendingPathComponent("\(UUID().uuidString).heic")
+        do { try data.write(to: url); return url } catch { return nil }
+    }
+
+    private static func downsampledImage(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return UIImage(data: data) }
+        return UIImage(cgImage: cg)
     }
 }

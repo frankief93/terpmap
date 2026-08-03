@@ -30,6 +30,9 @@ struct CameraView: View {
         .onReceive(lookStore.objectWillChange) { _ in
             DispatchQueue.main.async { pipeline.look = lookStore.effectiveLook }
         }
+        .onChange(of: camera.lens) {
+            pinchBaseZoom = camera.lens == .tele2x ? 2 : 1
+        }
         .sheet(isPresented: $showReview) {
             ReviewSheet(camera: camera)
         }
@@ -53,8 +56,22 @@ struct CameraView: View {
                 } else {
                     MetalPreviewView(pipeline: pipeline)
                         .onTapGesture(coordinateSpace: .local) { point in
-                            // Convert view point to device point-of-interest (0..1, landscape sensor space).
-                            let p = CGPoint(x: point.y / geo.size.height, y: 1 - point.x / geo.size.width)
+                            // View point -> device point-of-interest (0..1, landscape
+                            // sensor space), compensating for the aspect-fill crop and
+                            // for the mirrored front-camera preview.
+                            let frameAspect = pipeline.currentImage.map { $0.extent.width / $0.extent.height }
+                                ?? (3.0 / 4.0)
+                            let viewAspect = geo.size.width / geo.size.height
+                            var nx = point.x / geo.size.width
+                            var ny = point.y / geo.size.height
+                            if viewAspect < frameAspect {
+                                nx = 0.5 + (nx - 0.5) * (viewAspect / frameAspect)
+                            } else {
+                                ny = 0.5 + (ny - 0.5) * (frameAspect / viewAspect)
+                            }
+                            let p = camera.isFrontCamera
+                                ? CGPoint(x: ny, y: nx)
+                                : CGPoint(x: ny, y: 1 - nx)
                             camera.focusAndExpose(at: p)
                             Haptics.tap()
                         }
@@ -240,12 +257,18 @@ struct CameraView: View {
                         .foregroundStyle(camera.lens == lens ? .black : .white)
                 }
             }
-            if camera.naturalMode {
-                Text(camera.rawAvailable ? "RAW+" : "NATURAL")
+            Button {
+                camera.naturalMode.toggle()
+                Haptics.tap()
+            } label: {
+                Text(camera.naturalMode ? (camera.rawAvailable ? "RAW+" : "NATURAL") : "STD")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.orange)
-                    .padding(.leading, 6)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(camera.naturalMode ? Color.orange.opacity(0.22) : Color.white.opacity(0.07),
+                                in: Capsule())
+                    .foregroundStyle(camera.naturalMode ? .orange : .white.opacity(0.6))
             }
+            .padding(.leading, 6)
         }
     }
 
