@@ -21,9 +21,14 @@ final class CameraManager: NSObject, ObservableObject {
     @Published var availableLenses: [Lens] = [.wide]
     @Published var flashMode: AVCaptureDevice.FlashMode = .off
     @Published var isCapturing = false
-    @Published var lastPhoto: UIImage?
-    @Published var lastPhotoData: Data?
+    @Published var captures: [Capture] = []   // this session's shots, newest last
     @Published var errorMessage: String?
+
+    struct Capture: Identifiable {
+        let id = UUID()
+        let data: Data
+        let thumbnail: UIImage
+    }
 
     // Natural mode: Bayer RAW DNG + fast minimally-processed HEIF, saved as a pair.
     @Published var naturalMode = true
@@ -456,8 +461,11 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                     self.errorMessage = error ?? "Could not save to Photos."
                 }
                 if let image = UIImage(data: finalData) {
-                    self.lastPhoto = image
-                    self.lastPhotoData = finalData
+                    let thumb = image.preparingThumbnail(of: CGSize(width: 400, height: 400)) ?? image
+                    self.captures.append(Capture(data: finalData, thumbnail: thumb))
+                    if self.captures.count > 50 {
+                        self.captures.removeFirst(self.captures.count - 50)
+                    }
                     self.onPhotoSaved?(image)
                 }
             }

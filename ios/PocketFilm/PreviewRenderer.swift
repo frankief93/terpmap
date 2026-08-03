@@ -90,13 +90,7 @@ struct MetalPreviewView: UIViewRepresentable {
             let originY = (scaled.extent.height - drawableSize.height) / 2 + scaled.extent.origin.y
             let cropped = scaled.cropped(to: CGRect(x: originX, y: originY,
                                                     width: drawableSize.width, height: drawableSize.height))
-            var positioned = cropped.transformed(by: CGAffineTransform(translationX: -originX, y: -originY))
-
-            // Core Image renders with a bottom-left origin; Metal textures are
-            // top-left. Flip vertically or the preview draws upside down.
-            positioned = positioned
-                .transformed(by: CGAffineTransform(scaleX: 1, y: -1)
-                    .concatenating(CGAffineTransform(translationX: 0, y: drawableSize.height)))
+            let positioned = cropped.transformed(by: CGAffineTransform(translationX: -originX, y: -originY))
 
             ciContext.render(positioned,
                              to: drawable.texture,

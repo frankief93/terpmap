@@ -170,10 +170,10 @@ struct CameraView: View {
 
             HStack {
                 Button {
-                    if camera.lastPhoto != nil { showReview = true }
+                    if !camera.captures.isEmpty { showReview = true }
                 } label: {
                     Group {
-                        if let thumb = camera.lastPhoto {
+                        if let thumb = camera.captures.last?.thumbnail {
                             Image(uiImage: thumb).resizable().scaledToFill()
                         } else {
                             RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.06))
