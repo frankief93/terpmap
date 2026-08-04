@@ -15,6 +15,9 @@ struct CameraView: View {
 
     private struct Reticle { let point: CGPoint; let id: UUID }
     @State private var reticle: Reticle?
+    @State private var evDragBase: Double?
+    @State private var showEVSlider = false
+    @State private var evHideID = UUID()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -107,18 +110,31 @@ struct CameraView: View {
                             ? CGPoint(x: ny, y: nx)
                             : CGPoint(x: ny, y: 1 - nx)
                         camera.focusAndExpose(at: p)
+                        camera.setEVBias(0)   // fresh focus point, fresh exposure
                         Haptics.tap()
-
-                        let id = UUID()
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            reticle = Reticle(point: point, id: id)
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-                            if reticle?.id == id {
-                                withAnimation(.easeOut(duration: 0.3)) { reticle = nil }
-                            }
-                        }
+                        showReticle(at: point)
                     }
+                    .gesture(
+                        // Vertical drag = exposure (the sun slider). Checked before
+                        // pinch; the 12pt minimum keeps plain taps intact.
+                        DragGesture(minimumDistance: 12)
+                            .onChanged { value in
+                                guard !camera.manualExposure,
+                                      abs(value.translation.height) > abs(value.translation.width)
+                                else { return }
+                                if evDragBase == nil {
+                                    evDragBase = camera.evBias
+                                    withAnimation(.easeOut(duration: 0.15)) { showEVSlider = true }
+                                }
+                                camera.setEVBias((evDragBase ?? 0) - Double(value.translation.height) / 120.0)
+                                refreshReticleFade()
+                            }
+                            .onEnded { _ in
+                                evDragBase = nil
+                                scheduleEVHide()
+                                refreshReticleFade()
+                            }
+                    )
                     .gesture(
                         MagnifyGesture()
                             .onChanged { value in
@@ -140,10 +156,58 @@ struct CameraView: View {
                         .allowsHitTesting(false)
                         .transition(.scale(scale: 1.35).combined(with: .opacity))
                 }
+
+                if showEVSlider {
+                    EVSlider(ev: camera.evBias)
+                        .position(evSliderPosition(in: pgeo.size))
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
             }
         }
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Reticle + sun slider helpers
+
+    private func showReticle(at point: CGPoint) {
+        let id = UUID()
+        withAnimation(.easeOut(duration: 0.15)) { reticle = Reticle(point: point, id: id) }
+        scheduleReticleFade(id)
+    }
+
+    private func scheduleReticleFade(_ id: UUID) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            if reticle?.id == id, evDragBase == nil {
+                withAnimation(.easeOut(duration: 0.3)) { reticle = nil }
+            }
+        }
+    }
+
+    private func refreshReticleFade() {
+        guard let current = reticle else { return }
+        let id = UUID()
+        reticle = Reticle(point: current.point, id: id)
+        scheduleReticleFade(id)
+    }
+
+    private func scheduleEVHide() {
+        let id = UUID()
+        evHideID = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if evHideID == id, evDragBase == nil {
+                withAnimation(.easeOut(duration: 0.3)) { showEVSlider = false }
+            }
+        }
+    }
+
+    private func evSliderPosition(in size: CGSize) -> CGPoint {
+        if let point = reticle?.point {
+            let x = point.x + 82 <= size.width - 24 ? point.x + 64 : point.x - 64
+            return CGPoint(x: x, y: min(max(point.y, 80), size.height - 80))
+        }
+        return CGPoint(x: size.width - 36, y: size.height / 2)
     }
 
     private var topBar: some View {
@@ -357,6 +421,33 @@ extension Image {
             .frame(width: 42, height: 42)
             .background(active ? Color.orange.opacity(0.9) : Color.black.opacity(0.45), in: Circle())
             .foregroundStyle(active ? .black : .white)
+    }
+}
+
+/// The exposure sun-slider: a vertical track with a sun that rides the current
+/// EV bias, plus the numeric value when non-zero.
+struct EVSlider: View {
+    let ev: Double
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Capsule()
+                    .fill(Color.yellow.opacity(0.35))
+                    .frame(width: 2, height: 120)
+                Image(systemName: "sun.max.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.yellow)
+                    .shadow(color: .black.opacity(0.5), radius: 2)
+                    .offset(y: CGFloat(-ev / 3.0) * 52)
+            }
+            if abs(ev) >= 0.05 {
+                Text(String(format: "%+.1f", ev))
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.yellow)
+                    .shadow(color: .black.opacity(0.5), radius: 2)
+            }
+        }
     }
 }
 

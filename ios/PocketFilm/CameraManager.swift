@@ -442,6 +442,37 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    private let evLock = NSLock()
+    private var pendingEV: Double?
+
+    /// Exposure bias from the viewfinder sun-slider drag. Coalesced like zoom so
+    /// a fast drag doesn't stack lock/unlock cycles.
+    func setEVBias(_ value: Double) {
+        let clamped = min(max(value, -3), 3)
+        evBias = clamped
+        guard !manualExposure else { return }
+        evLock.lock()
+        let alreadyQueued = pendingEV != nil
+        pendingEV = clamped
+        evLock.unlock()
+        guard !alreadyQueued else { return }
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.device else { return }
+            self.evLock.lock()
+            let target = self.pendingEV
+            self.pendingEV = nil
+            self.evLock.unlock()
+            guard let target else { return }
+            do {
+                try device.lockForConfiguration()
+                let bias = Float(min(max(target, Double(device.minExposureTargetBias)),
+                                     Double(device.maxExposureTargetBias)))
+                device.setExposureTargetBias(bias, completionHandler: nil)
+                device.unlockForConfiguration()
+            } catch { }
+        }
+    }
+
     private let zoomLock = NSLock()
     private var pendingZoom: Double?
 
