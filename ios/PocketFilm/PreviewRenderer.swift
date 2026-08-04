@@ -7,6 +7,11 @@ import SwiftUI
 final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     @Published private(set) var hasFrame = false
+    @Published private(set) var frameMs: Double = 0   // smoothed inter-frame time
+
+    private var lastFrameAt: CFAbsoluteTime = 0
+    private var frameDeltaEMA: Double = 0
+    private var framesSincePublish = 0
 
     private let renderQueue = DispatchQueue(label: "pocketfilm.preview")
     private let stateLock = NSLock()
@@ -44,6 +49,20 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        if lastFrameAt > 0 {
+            let delta = now - lastFrameAt
+            frameDeltaEMA = frameDeltaEMA == 0 ? delta : frameDeltaEMA * 0.9 + delta * 0.1
+        }
+        lastFrameAt = now
+        framesSincePublish += 1
+        if framesSincePublish >= 15 {
+            framesSincePublish = 0
+            let ms = frameDeltaEMA * 1000
+            DispatchQueue.main.async { [weak self] in self?.frameMs = ms }
+        }
+
         var image = CIImage(cvPixelBuffer: buffer)
         let longEdge = max(image.extent.width, image.extent.height)
         if longEdge > previewMaxEdge {
@@ -60,7 +79,10 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.stateLock.lock(); self.displayRequestPending = false; self.stateLock.unlock()
-            if !self.hasFrame { self.hasFrame = true }
+            if !self.hasFrame {
+                self.hasFrame = true
+                PerfClock.firstFrame = Date().timeIntervalSince(PerfClock.appStart)
+            }
             self.mtkView?.setNeedsDisplay()
         }
     }

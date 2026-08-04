@@ -4,6 +4,13 @@ import ImageIO
 import UIKit
 
 /// Owns the AVCaptureSession, device configuration, manual controls, and photo capture.
+/// Coarse launch milestones for the debug HUD. Debug-only precision is fine.
+enum PerfClock {
+    static let appStart = Date()
+    static var sessionRunning: TimeInterval?
+    static var firstFrame: TimeInterval?
+}
+
 final class CameraManager: NSObject, ObservableObject {
 
     enum Lens: String, CaseIterable, Identifiable {
@@ -114,6 +121,9 @@ final class CameraManager: NSObject, ObservableObject {
             }
             if !self.session.isRunning {
                 self.session.startRunning()
+                if PerfClock.sessionRunning == nil {
+                    PerfClock.sessionRunning = Date().timeIntervalSince(PerfClock.appStart)
+                }
                 DispatchQueue.main.async { self.isRunning = self.session.isRunning }
             }
         }

@@ -7,6 +7,7 @@ struct CameraView: View {
     @StateObject private var lookStore = LookStore.shared
     @StateObject private var pipeline = PreviewPipeline()
     @AppStorage("showGrid") private var showGrid = false
+    @AppStorage("showPerfHUD") private var showPerfHUD = false
     @State private var showManualPanel = false
     @State private var showReview = false
     @State private var flashOpacity: Double = 0
@@ -74,6 +75,7 @@ struct CameraView: View {
 
             VStack {
                 topBar
+                if showPerfHUD { perfHUD }
                 Spacer()
                 if camera.isCapturing {
                     ProgressView()
@@ -162,6 +164,10 @@ struct CameraView: View {
                 .tracking(2)
                 .padding(.horizontal, 14).padding(.vertical, 7)
                 .background(.black.opacity(0.45), in: Capsule())
+                .onLongPressGesture {
+                    showPerfHUD.toggle()
+                    Haptics.tap()
+                }
 
             Spacer()
 
@@ -308,6 +314,24 @@ struct CameraView: View {
             }
             .padding(.leading, 6)
         }
+    }
+
+    private var perfHUD: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            let ms = pipeline.frameMs
+            Text(String(format: "preview  %.0f ms/frame  (~%.0f fps)", ms, ms > 0 ? 1000 / ms : 0))
+            Text(String(format: "open → camera   %.2fs", PerfClock.sessionRunning ?? 0))
+            Text(String(format: "camera → frame  %.2fs",
+                        max(0, (PerfClock.firstFrame ?? 0) - (PerfClock.sessionRunning ?? 0))))
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .foregroundStyle(.yellow)
+        .padding(8)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
+        .allowsHitTesting(false)
     }
 
     private func zoomLabel(_ z: Double) -> String {
