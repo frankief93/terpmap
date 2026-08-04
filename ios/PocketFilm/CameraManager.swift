@@ -44,12 +44,9 @@ final class CameraManager: NSObject, ObservableObject {
     @Published var naturalMode = true
     @Published var rawAvailable = false
 
-    // Full sensor resolution (48MP where supported). Slower per shot, bigger files.
+    // Full sensor resolution (48MP where supported). Read per shot — no pipeline
+    // reconfiguration when toggled.
     @Published var fullResolution = false
-
-    func applyResolution() {
-        sessionQueue.async { [weak self] in self?.refreshOutputDimensions() }
-    }
 
     // Manual exposure. When `manualExposure` is false the device runs full auto.
     @Published var manualExposure = false
@@ -132,6 +129,13 @@ final class CameraManager: NSObject, ObservableObject {
             session.addOutput(photoOutput)
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
+        // iOS 17+ responsive-capture stack: ring-buffer zero shutter lag, overlapped
+        // capture/processing, adaptive pacing. Configured here, once, inside the
+        // initial transaction — the pipeline is built a single time before startup
+        // instead of being rebuilt mid-preview (which reads as glitchy frames).
+        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
+        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
+        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
 
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -139,29 +143,32 @@ final class CameraManager: NSObject, ObservableObject {
             session.addOutput(videoOutput)
         }
 
-        session.commitConfiguration()
+        // Rotation/mirroring inside the transaction so a camera change applies
+        // atomically — no wrong-sided/upside-down frames leaking through.
         updateConnections(front: false)
+        session.commitConfiguration()
+        applyMaxOutputDimensions()
         refreshCapabilities()
+    }
 
-        // Defer the heavy photo-pipeline upgrades (48MP dimensions + the responsive
-        // capture stack, a "lengthy reconfiguration" per the SDK) until after the
-        // preview is live — doing them up front costs seconds of black screen.
-        sessionQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.upgradePhotoPipeline()
+    /// Configure the output for the largest still the device supports, once per
+    /// device. Per-shot resolution (24MP default vs 48MP) is chosen on the photo
+    /// settings instead — requesting smaller than the output max is free, while
+    /// changing the output dimensions is a lengthy pipeline rebuild.
+    private func applyMaxOutputDimensions() {
+        guard let device else { return }
+        let dims = device.activeFormat.supportedMaxPhotoDimensions
+        if let biggest = dims.max(by: { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) }) {
+            photoOutput.maxPhotoDimensions = biggest
         }
     }
 
-    private func upgradePhotoPipeline() {
-        session.beginConfiguration()
-        // iOS 17+ responsive-capture stack: ring-buffer zero shutter lag, overlapped
-        // capture/processing, and adaptive pacing under rapid fire. Order matters —
-        // each tier requires the previous one.
-        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
-        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
-        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
-        session.commitConfiguration()
-        refreshOutputDimensions()
-        refreshCapabilities()
+    private func perShotDimensions() -> CMVideoDimensions {
+        let dims = device?.activeFormat.supportedMaxPhotoDimensions ?? []
+        func pixels(_ d: CMVideoDimensions) -> Int64 { Int64(d.width) * Int64(d.height) }
+        if fullResolution { return photoOutput.maxPhotoDimensions }
+        return dims.filter { pixels($0) <= 26_000_000 }.max { pixels($0) < pixels($1) }
+            ?? photoOutput.maxPhotoDimensions
     }
 
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
@@ -241,24 +248,6 @@ final class CameraManager: NSObject, ObservableObject {
         } catch { }
     }
 
-    private func refreshOutputDimensions() {
-        guard let device else { return }
-        let dims = device.activeFormat.supportedMaxPhotoDimensions
-        func pixels(_ d: CMVideoDimensions) -> Int64 { Int64(d.width) * Int64(d.height) }
-        let pick: CMVideoDimensions?
-        if fullResolution {
-            pick = dims.max { pixels($0) < pixels($1) }
-        } else {
-            // Balanced default: largest option up to ~24MP. 48MP HEICs take
-            // noticeably longer to filter and encode.
-            pick = dims.filter { pixels($0) <= 26_000_000 }.max { pixels($0) < pixels($1) }
-                ?? dims.min { pixels($0) < pixels($1) }
-        }
-        if let pick {
-            photoOutput.maxPhotoDimensions = pick
-        }
-    }
-
     private func refreshCapabilities() {
         guard let device else { return }
         let format = device.activeFormat
@@ -321,9 +310,9 @@ final class CameraManager: NSObject, ObservableObject {
             guard let self else { return }
             self.session.beginConfiguration()
             self.attachDevice(position: .back, lens: newLens)
-            self.session.commitConfiguration()
             self.updateConnections(front: false)
-            self.refreshOutputDimensions()
+            self.session.commitConfiguration()
+            self.applyMaxOutputDimensions()
             self.refreshCapabilities()
             self.reapplyManualSettings()
         }
@@ -337,9 +326,9 @@ final class CameraManager: NSObject, ObservableObject {
             guard let self else { return }
             self.session.beginConfiguration()
             self.attachDevice(position: toFront ? .front : .back, lens: self.lens)
-            self.session.commitConfiguration()
             self.updateConnections(front: toFront)
-            self.refreshOutputDimensions()
+            self.session.commitConfiguration()
+            self.applyMaxOutputDimensions()
             self.refreshCapabilities()
             self.reapplyManualSettings()
         }
@@ -443,14 +432,29 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    private let zoomLock = NSLock()
+    private var pendingZoom: Double?
+
     func setZoom(_ factor: Double) {
         let clamped = min(max(factor, 1), maxZoom)
         zoom = clamped
+        // Coalesce pinch ticks: apply only the latest value per queue turn, so a
+        // fast gesture doesn't stack dozens of lock/unlock cycles and stutter.
+        zoomLock.lock()
+        let alreadyQueued = pendingZoom != nil
+        pendingZoom = clamped
+        zoomLock.unlock()
+        guard !alreadyQueued else { return }
         sessionQueue.async { [weak self] in
             guard let self, let device = self.device else { return }
+            self.zoomLock.lock()
+            let target = self.pendingZoom
+            self.pendingZoom = nil
+            self.zoomLock.unlock()
+            guard let target else { return }
             do {
                 try device.lockForConfiguration()
-                device.videoZoomFactor = CGFloat(clamped)
+                device.videoZoomFactor = CGFloat(target)
                 device.unlockForConfiguration()
             } catch { }
         }
@@ -489,7 +493,7 @@ final class CameraManager: NSObject, ObservableObject {
             } else {
                 settings = AVCapturePhotoSettings()
             }
-            settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
+            settings.maxPhotoDimensions = self.perShotDimensions()
             // Natural mode keeps Apple's multi-frame fusion light; standard mode lets it work.
             settings.photoQualityPrioritization = self.naturalMode ? .speed : .quality
             if self.photoOutput.supportedFlashModes.contains(flash) {

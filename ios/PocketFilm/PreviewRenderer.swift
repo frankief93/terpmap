@@ -6,6 +6,8 @@ import SwiftUI
 /// Receives camera frames and renders them with the live look applied, via Metal.
 final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
+    @Published private(set) var hasFrame = false
+
     private let renderQueue = DispatchQueue(label: "pocketfilm.preview")
     private let stateLock = NSLock()
 
@@ -58,6 +60,7 @@ final class PreviewPipeline: NSObject, ObservableObject, AVCaptureVideoDataOutpu
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.stateLock.lock(); self.displayRequestPending = false; self.stateLock.unlock()
+            if !self.hasFrame { self.hasFrame = true }
             self.mtkView?.setNeedsDisplay()
         }
     }

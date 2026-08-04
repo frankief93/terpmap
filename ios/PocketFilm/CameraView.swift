@@ -52,77 +52,33 @@ struct CameraView: View {
     // MARK: - Viewfinder
 
     private var viewfinder: some View {
-        GeometryReader { geo in
-            ZStack {
-                if camera.permissionDenied {
-                    permissionView
-                } else {
-                    MetalPreviewView(pipeline: pipeline)
-                        .onTapGesture(coordinateSpace: .local) { point in
-                            // View point -> device point-of-interest (0..1, landscape
-                            // sensor space), compensating for the aspect-fill crop and
-                            // for the mirrored front-camera preview.
-                            let frameAspect = pipeline.currentImage.map { $0.extent.width / $0.extent.height }
-                                ?? (3.0 / 4.0)
-                            let viewAspect = geo.size.width / geo.size.height
-                            var nx = point.x / geo.size.width
-                            var ny = point.y / geo.size.height
-                            if viewAspect < frameAspect {
-                                nx = 0.5 + (nx - 0.5) * (viewAspect / frameAspect)
-                            } else {
-                                ny = 0.5 + (ny - 0.5) * (frameAspect / viewAspect)
-                            }
-                            let p = camera.isFrontCamera
-                                ? CGPoint(x: ny, y: nx)
-                                : CGPoint(x: ny, y: 1 - nx)
-                            camera.focusAndExpose(at: p)
-                            Haptics.tap()
-
-                            let id = UUID()
-                            withAnimation(.easeOut(duration: 0.15)) {
-                                reticle = Reticle(point: point, id: id)
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-                                if reticle?.id == id {
-                                    withAnimation(.easeOut(duration: 0.3)) { reticle = nil }
-                                }
-                            }
-                        }
-                        .gesture(
-                            MagnifyGesture()
-                                .onChanged { value in
-                                    camera.setZoom(pinchBaseZoom * value.magnification)
-                                }
-                                .onEnded { _ in
-                                    pinchBaseZoom = camera.zoom
-                                    camera.lens = camera.activeChip
-                                }
-                        )
-
-                    if let reticle {
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.yellow.opacity(0.9), lineWidth: 1.5)
-                            .frame(width: 74, height: 74)
-                            .position(reticle.point)
-                            .allowsHitTesting(false)
-                            .transition(.scale(scale: 1.35).combined(with: .opacity))
+        ZStack {
+            Color.black
+            if camera.permissionDenied {
+                permissionView
+            } else {
+                previewArea
+                if !pipeline.hasFrame {
+                    VStack(spacing: 10) {
+                        ProgressView().tint(.white)
+                        Text("Opening camera…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
+            }
 
-                if showGrid { gridOverlay }
+            Color.white
+                .opacity(flashOpacity)
+                .allowsHitTesting(false)
 
-                Color.white
-                    .opacity(flashOpacity)
-                    .allowsHitTesting(false)
-
-                VStack {
-                    topBar
-                    Spacer()
-                    if camera.isCapturing {
-                        ProgressView()
-                            .tint(.white)
-                            .padding(.bottom, 18)
-                    }
+            VStack {
+                topBar
+                Spacer()
+                if camera.isCapturing {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(.bottom, 18)
                 }
             }
         }
@@ -131,6 +87,61 @@ struct CameraView: View {
         .onCameraCaptureEvent { event in
             if event.phase == .ended { shoot() }
         }
+    }
+
+    /// The camera frame at its true 3:4 aspect — what you see is exactly what gets
+    /// captured. No hidden crop; the full wide selfie field of view is visible.
+    private var previewArea: some View {
+        GeometryReader { pgeo in
+            ZStack {
+                MetalPreviewView(pipeline: pipeline)
+                    .onTapGesture(coordinateSpace: .local) { point in
+                        // Full frame is visible, so the mapping to the sensor's
+                        // landscape point-of-interest space is direct; the front
+                        // preview is mirrored, so un-mirror its axis.
+                        let nx = point.x / pgeo.size.width
+                        let ny = point.y / pgeo.size.height
+                        let p = camera.isFrontCamera
+                            ? CGPoint(x: ny, y: nx)
+                            : CGPoint(x: ny, y: 1 - nx)
+                        camera.focusAndExpose(at: p)
+                        Haptics.tap()
+
+                        let id = UUID()
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            reticle = Reticle(point: point, id: id)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                            if reticle?.id == id {
+                                withAnimation(.easeOut(duration: 0.3)) { reticle = nil }
+                            }
+                        }
+                    }
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                camera.setZoom(pinchBaseZoom * value.magnification)
+                            }
+                            .onEnded { _ in
+                                pinchBaseZoom = camera.zoom
+                                camera.lens = camera.activeChip
+                            }
+                    )
+
+                if showGrid { gridOverlay }
+
+                if let reticle {
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.yellow.opacity(0.9), lineWidth: 1.5)
+                        .frame(width: 74, height: 74)
+                        .position(reticle.point)
+                        .allowsHitTesting(false)
+                        .transition(.scale(scale: 1.35).combined(with: .opacity))
+                }
+            }
+        }
+        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var topBar: some View {

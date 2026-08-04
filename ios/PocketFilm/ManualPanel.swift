@@ -156,7 +156,6 @@ struct ManualPanel: View {
             }
             .tint(.orange)
             .padding(.horizontal, 16)
-            .onChange(of: camera.fullResolution) { camera.applyResolution() }
 
             Text("Off = full Apple computational pipeline (Smart HDR, fusion). On = closer to a single, honest exposure.")
                 .font(.caption2)
