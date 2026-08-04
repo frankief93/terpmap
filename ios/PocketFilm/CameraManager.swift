@@ -20,6 +20,16 @@ final class CameraManager: NSObject, ObservableObject {
         var id: String { rawValue }
     }
 
+    /// One-tap capture intents. Semi-auto: AE keeps metering; the preset shapes
+    /// what it's allowed to do (shutter caps, quality prioritization, lens).
+    enum CapturePreset: String, CaseIterable, Identifiable {
+        case auto = "AUTO"
+        case action = "ACTION"
+        case night = "NIGHT"
+        case portrait = "PORTRAIT"
+        var id: String { rawValue }
+    }
+
     // MARK: - Published state (main thread)
 
     @Published var isRunning = false
@@ -28,6 +38,8 @@ final class CameraManager: NSObject, ObservableObject {
     @Published var lens: Lens = .wide
     @Published var availableLenses: [Lens] = [.wide]
     @Published var flashMode: AVCaptureDevice.FlashMode = .off
+    @Published var preset: CapturePreset = .auto
+    @Published var aeafLocked = false
     @Published var isCapturing = false
     @Published var captures: [Capture] = []   // this session's shots, newest last
     @Published var errorMessage: String?
@@ -81,6 +93,7 @@ final class CameraManager: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "pocketfilm.session")
     private var currentInput: AVCaptureDeviceInput?
     private var device: AVCaptureDevice? { currentInput?.device }
+    private var defaultMaxExposure: CMTime?
     private var inFlightCaptures: [Int64: CaptureContext] = [:]
 
     var onPhotoSaved: ((UIImage) -> Void)?
@@ -238,6 +251,7 @@ final class CameraManager: NSObject, ObservableObject {
             if session.canAddInput(input) {
                 session.addInput(input)
                 currentInput = input
+                defaultMaxExposure = device.activeMaxExposureDuration
             }
         } catch {
             DispatchQueue.main.async { self.errorMessage = "Camera unavailable: \(error.localizedDescription)" }
@@ -254,7 +268,10 @@ final class CameraManager: NSObject, ObservableObject {
                 : 1.0
             device.videoZoomFactor = target
             device.unlockForConfiguration()
-            DispatchQueue.main.async { self.zoom = Double(target) }
+            DispatchQueue.main.async {
+                self.actualZoom = Double(target)
+                self.zoom = Double(target)
+            }
         } catch { }
     }
 
@@ -311,9 +328,8 @@ final class CameraManager: NSObject, ObservableObject {
         lens = newLens
         guard !isFrontCamera else { return }
         if !wasUltraWide && newLens != .ultraWide {
-            // 1x and 2x share the same physical camera — a zoom change, not a
-            // device swap, so it's instant.
-            setZoom(newLens == .tele2x ? 2 : 1)
+            // 1x and 2x share the same physical camera — glide there, no device swap.
+            applyZoomRamped(newLens == .tele2x ? 2 : 1)
             return
         }
         sessionQueue.async { [weak self] in
@@ -418,6 +434,58 @@ final class CameraManager: NSObject, ObservableObject {
         if manualExposure { applyExposure() }
         if manualWB { applyWhiteBalance() }
         if manualFocus { applyFocus() }
+        applyPresetDeviceSide()
+    }
+
+    // MARK: - Capture presets
+
+    func applyPreset(_ newPreset: CapturePreset) {
+        preset = newPreset
+        if newPreset == .portrait, !isFrontCamera,
+           availableLenses.contains(.tele2x), activeChip != .tele2x {
+            selectLens(.tele2x)
+        }
+        applyPresetDeviceSide()
+    }
+
+    private func applyPresetDeviceSide() {
+        let current = preset
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.device else { return }
+            do {
+                try device.lockForConfiguration()
+                switch current {
+                case .action:
+                    // Freeze motion: never let AE pick slower than 1/500.
+                    device.activeMaxExposureDuration = CMTime(value: 1, timescale: 500)
+                case .night:
+                    // Let AE go as slow as 1/8 for light-gathering (handheld limit).
+                    device.activeMaxExposureDuration = CMTime(value: 1, timescale: 8)
+                case .auto, .portrait:
+                    if let def = self.defaultMaxExposure {
+                        device.activeMaxExposureDuration = def
+                    }
+                }
+                device.unlockForConfiguration()
+            } catch { }
+        }
+    }
+
+    // MARK: - AE/AF lock
+
+    /// One-shot focus/expose at the point, then lock both until the next tap.
+    func lockAEAF(at devicePoint: CGPoint) {
+        focusAndExpose(at: devicePoint)
+        sessionQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self, let device = self.device else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+                if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
+                device.unlockForConfiguration()
+            } catch { }
+            DispatchQueue.main.async { self.aeafLocked = true }
+        }
     }
 
     func focusAndExpose(at devicePoint: CGPoint) {
@@ -437,6 +505,7 @@ final class CameraManager: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     self.manualExposure = false
                     self.manualFocus = false
+                    self.aeafLocked = false
                 }
             } catch { }
         }
@@ -444,12 +513,26 @@ final class CameraManager: NSObject, ObservableObject {
 
     private let evLock = NSLock()
     private var pendingEV: Double?
+    private var actualEV: Double = 0
+    private var lastEVUIUpdate: CFAbsoluteTime = 0
 
-    /// Exposure bias from the viewfinder sun-slider drag. Coalesced like zoom so
-    /// a fast drag doesn't stack lock/unlock cycles.
+    /// The live gesture value, exact even between throttled UI publishes.
+    var currentEV: Double { actualEV }
+
+    /// Publish the exact final value at the end of a drag.
+    func endEVGesture() { evBias = actualEV }
+
+    /// Exposure bias from the viewfinder sun-slider drag. The hardware gets every
+    /// tick (coalesced); the published UI value updates at ~30Hz so a 120Hz drag
+    /// doesn't recompute the whole view hierarchy per tick.
     func setEVBias(_ value: Double) {
         let clamped = min(max(value, -3), 3)
-        evBias = clamped
+        actualEV = clamped
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - lastEVUIUpdate > 0.033 {
+            lastEVUIUpdate = now
+            evBias = clamped
+        }
         guard !manualExposure else { return }
         evLock.lock()
         let alreadyQueued = pendingEV != nil
@@ -475,10 +558,26 @@ final class CameraManager: NSObject, ObservableObject {
 
     private let zoomLock = NSLock()
     private var pendingZoom: Double?
+    private var actualZoom: Double = 1
+    private var lastZoomUIUpdate: CFAbsoluteTime = 0
+
+    /// The live gesture value, exact even between throttled UI publishes.
+    var currentZoom: Double { actualZoom }
+
+    /// Publish the exact final value at the end of a pinch.
+    func endZoomGesture() { zoom = actualZoom }
 
     func setZoom(_ factor: Double) {
         let clamped = min(max(factor, 1), maxZoom)
-        zoom = clamped
+        actualZoom = clamped
+        // The hardware gets every tick (coalesced below); the published UI value
+        // updates at ~10Hz — republishing per 120Hz pinch tick recomputed the
+        // whole view hierarchy and fought the preview for the main thread.
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - lastZoomUIUpdate > 0.1 {
+            lastZoomUIUpdate = now
+            zoom = clamped
+        }
         // Coalesce pinch ticks: apply only the latest value per queue turn, so a
         // fast gesture doesn't stack dozens of lock/unlock cycles and stutter.
         zoomLock.lock()
@@ -501,6 +600,21 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    /// Chip taps glide to the target zoom with the hardware ramp (Apple-style)
+    /// instead of snapping.
+    private func applyZoomRamped(_ target: Double) {
+        actualZoom = target
+        zoom = target
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.device else { return }
+            do {
+                try device.lockForConfiguration()
+                device.ramp(toVideoZoomFactor: CGFloat(target), withRate: 6)
+                device.unlockForConfiguration()
+            } catch { }
+        }
+    }
+
     // MARK: - Capture
 
     private struct CaptureContext {
@@ -514,6 +628,7 @@ final class CameraManager: NSObject, ObservableObject {
         isCapturing = true
         let wantRaw = naturalMode && rawAvailable && !isFrontCamera
         let flash = flashMode
+        let presetSnapshot = preset
 
         sessionQueue.async { [weak self] in
             guard let self else { return }
@@ -535,8 +650,13 @@ final class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
             settings.maxPhotoDimensions = self.perShotDimensions()
-            // Natural mode keeps Apple's multi-frame fusion light; standard mode lets it work.
-            settings.photoQualityPrioritization = self.naturalMode ? .speed : .quality
+            // Natural mode keeps Apple's multi-frame fusion light; standard mode
+            // lets it work — except ACTION, which prioritizes shot speed always.
+            if self.naturalMode || presetSnapshot == .action {
+                settings.photoQualityPrioritization = .speed
+            } else {
+                settings.photoQualityPrioritization = .quality
+            }
             if self.photoOutput.supportedFlashModes.contains(flash) {
                 settings.flashMode = flash
             }

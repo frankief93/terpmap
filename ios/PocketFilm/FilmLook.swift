@@ -129,13 +129,36 @@ final class LookEngine {
         CIFilter.randomGenerator().outputImage ?? CIImage.empty()
     }()
 
+    private var grainOverlayCache: (key: String, image: CIImage)?
+
     private func applyGrain(_ look: FilmLook, to image: CIImage, subtle: Bool) -> CIImage {
         let amount = look.grain * (subtle ? 0.5 : 1.0)
+        let noise = grainOverlay(amount: amount, extent: image.extent, cached: subtle)
+        let blend = CIFilter.softLightBlendMode()
+        blend.inputImage = noise
+        blend.backgroundImage = image
+        return blend.outputImage ?? image
+    }
+
+    /// The processed noise layer. For the live preview (`cached`) the identical
+    /// overlay is reused frame after frame — rebuilding it 30x/second was pure
+    /// waste since the noise source is static anyway.
+    private func grainOverlay(amount: Double, extent: CGRect, cached: Bool) -> CIImage {
+        let key = String(format: "%d-%.0fx%.0f", Int(amount * 1000), extent.width, extent.height)
+        if cached {
+            cacheLock.lock()
+            if let hit = grainOverlayCache, hit.key == key {
+                cacheLock.unlock()
+                return hit.image
+            }
+            cacheLock.unlock()
+        }
+
         // Scale noise up slightly relative to image size so grain has body at 48MP.
-        let grainScale = max(1.0, image.extent.width / 1600.0)
+        let grainScale = max(1.0, extent.width / 1600.0)
         var noise = noiseSource
             .transformed(by: CGAffineTransform(scaleX: grainScale, y: grainScale))
-            .cropped(to: image.extent)
+            .cropped(to: extent)
 
         // Desaturate and center around 0.5 gray with amplitude proportional to `amount`.
         let a = CGFloat(0.35 * amount)
@@ -148,10 +171,12 @@ final class LookEngine {
         matrix.biasVector = CIVector(x: 0.5 - a / 2, y: 0.5 - a / 2, z: 0.5 - a / 2, w: 0)
         noise = matrix.outputImage ?? noise
 
-        let blend = CIFilter.softLightBlendMode()
-        blend.inputImage = noise
-        blend.backgroundImage = image
-        return blend.outputImage ?? image
+        if cached {
+            cacheLock.lock()
+            grainOverlayCache = (key, noise)
+            cacheLock.unlock()
+        }
+        return noise
     }
 
     // MARK: - Halation

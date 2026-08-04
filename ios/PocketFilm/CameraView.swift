@@ -18,6 +18,7 @@ struct CameraView: View {
     @State private var evDragBase: Double?
     @State private var showEVSlider = false
     @State private var evHideID = UUID()
+    @State private var flipDim = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -38,7 +39,7 @@ struct CameraView: View {
             DispatchQueue.main.async { pipeline.look = lookStore.effectiveLook }
         }
         .onChange(of: camera.lens) {
-            pinchBaseZoom = camera.zoom
+            pinchBaseZoom = camera.currentZoom
         }
         .sheet(isPresented: $showReview) {
             ReviewSheet(camera: camera)
@@ -78,6 +79,15 @@ struct CameraView: View {
 
             VStack {
                 topBar
+                if camera.aeafLocked {
+                    Text("AE/AF LOCK")
+                        .font(.caption2.weight(.bold))
+                        .tracking(1)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.yellow, in: Capsule())
+                        .foregroundStyle(.black)
+                        .padding(.top, 6)
+                }
                 if showPerfHUD { perfHUD }
                 Spacer()
                 if camera.isCapturing {
@@ -90,7 +100,11 @@ struct CameraView: View {
         .clipShape(RoundedRectangle(cornerRadius: 24))
         .padding(.horizontal, 4)
         .onCameraCaptureEvent { event in
-            if event.phase == .ended { shoot() }
+            switch event.phase {
+            case .began: Haptics.tap()   // half-press feedback on volume press
+            case .ended: shoot()
+            default: break
+            }
         }
     }
 
@@ -123,7 +137,7 @@ struct CameraView: View {
                                       abs(value.translation.height) > abs(value.translation.width)
                                 else { return }
                                 if evDragBase == nil {
-                                    evDragBase = camera.evBias
+                                    evDragBase = camera.currentEV
                                     withAnimation(.easeOut(duration: 0.15)) { showEVSlider = true }
                                 }
                                 camera.setEVBias((evDragBase ?? 0) - Double(value.translation.height) / 120.0)
@@ -131,6 +145,7 @@ struct CameraView: View {
                             }
                             .onEnded { _ in
                                 evDragBase = nil
+                                camera.endEVGesture()
                                 scheduleEVHide()
                                 refreshReticleFade()
                             }
@@ -141,10 +156,26 @@ struct CameraView: View {
                                 camera.setZoom(pinchBaseZoom * value.magnification)
                             }
                             .onEnded { _ in
-                                pinchBaseZoom = camera.zoom
+                                camera.endZoomGesture()
+                                pinchBaseZoom = camera.currentZoom
                                 camera.lens = camera.activeChip
                             }
                     )
+                    .opacity(pipeline.hasFrame ? 1 : 0)
+                    .animation(.easeIn(duration: 0.3), value: pipeline.hasFrame)
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        // Hold to lock AE/AF at the last tapped point (or center).
+                        let vp = reticle?.point
+                            ?? CGPoint(x: pgeo.size.width / 2, y: pgeo.size.height / 2)
+                        let nx = vp.x / pgeo.size.width
+                        let ny = vp.y / pgeo.size.height
+                        let p = camera.isFrontCamera
+                            ? CGPoint(x: ny, y: nx)
+                            : CGPoint(x: ny, y: 1 - nx)
+                        camera.lockAEAF(at: p)
+                        showReticle(at: vp)
+                        Haptics.shutter()
+                    }
 
                 if showGrid { gridOverlay }
 
@@ -163,6 +194,12 @@ struct CameraView: View {
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
+
+                // Brief dim while the camera flips, so the reconfiguration is a
+                // clean cut instead of visible pipeline chaos.
+                Color.black
+                    .opacity(flipDim ? 0.85 : 0)
+                    .allowsHitTesting(false)
             }
         }
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
@@ -212,13 +249,26 @@ struct CameraView: View {
 
     private var topBar: some View {
         HStack {
-            Button {
-                camera.flashMode = camera.flashMode == .off ? .on : (camera.flashMode == .on ? .auto : .off)
-                Haptics.tap()
+            // Tap toggles off <-> auto (the two states people live in); long-press
+            // opens the full menu. State is always readable, never a blind cycle.
+            Menu {
+                Button("Off") { camera.flashMode = .off }
+                Button("Auto") { camera.flashMode = .auto }
+                Button("On") { camera.flashMode = .on }
             } label: {
-                Image(systemName: camera.flashMode == .off ? "bolt.slash"
-                      : camera.flashMode == .on ? "bolt.fill" : "bolt.badge.automatic")
-                    .chipStyle()
+                VStack(spacing: 0) {
+                    Image(systemName: camera.flashMode == .off ? "bolt.slash" : "bolt.fill")
+                        .font(.system(size: 15, weight: .medium))
+                    Text(camera.flashMode == .off ? "OFF" : camera.flashMode == .on ? "ON" : "AUTO")
+                        .font(.system(size: 7, weight: .bold))
+                }
+                .frame(width: 42, height: 42)
+                .background(camera.flashMode == .off ? Color.black.opacity(0.45) : Color.yellow.opacity(0.85),
+                            in: Circle())
+                .foregroundStyle(camera.flashMode == .off ? .white : .black)
+            } primaryAction: {
+                camera.flashMode = camera.flashMode == .off ? .auto : .off
+                Haptics.tap()
             }
 
             Spacer()
@@ -286,6 +336,8 @@ struct CameraView: View {
         VStack(spacing: 10) {
             LookPickerBar(lookStore: lookStore)
 
+            presetBar
+
             if showManualPanel {
                 ManualPanel(camera: camera, lookStore: lookStore)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -321,8 +373,12 @@ struct CameraView: View {
                         Image(systemName: "dial.high").chipStyle(active: showManualPanel)
                     }
                     Button {
+                        withAnimation(.easeIn(duration: 0.12)) { flipDim = true }
                         camera.flipCamera()
                         Haptics.tap()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                            withAnimation(.easeOut(duration: 0.25)) { flipDim = false }
+                        }
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath.camera").chipStyle()
                     }
@@ -336,16 +392,46 @@ struct CameraView: View {
         .foregroundStyle(.white)
     }
 
+    @State private var shutterPressed = false
+
+    /// Fires on touch-DOWN, not release — the cheapest real latency win there is,
+    /// and it also reduces the shake a lifting finger causes.
     private var shutterButton: some View {
-        Button(action: shoot) {
-            ZStack {
-                Circle().stroke(.white, lineWidth: 4).frame(width: 74, height: 74)
-                Circle().fill(.white).frame(width: 60, height: 60)
-                    .scaleEffect(camera.isCapturing ? 0.8 : 1)
-                    .animation(.spring(duration: 0.2), value: camera.isCapturing)
+        ZStack {
+            Circle().stroke(.white, lineWidth: 4).frame(width: 74, height: 74)
+            Circle().fill(.white).frame(width: 60, height: 60)
+                .scaleEffect(shutterPressed || camera.isCapturing ? 0.85 : 1)
+                .animation(.spring(duration: 0.2), value: shutterPressed)
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !shutterPressed {
+                        shutterPressed = true
+                        shoot()
+                    }
+                }
+                .onEnded { _ in shutterPressed = false }
+        )
+    }
+
+    private var presetBar: some View {
+        HStack(spacing: 8) {
+            ForEach(CameraManager.CapturePreset.allCases) { p in
+                Button {
+                    camera.applyPreset(p)
+                    Haptics.tap()
+                } label: {
+                    Text(p.rawValue)
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(camera.preset == p ? Color.white.opacity(0.9) : Color.white.opacity(0.06),
+                                    in: Capsule())
+                        .foregroundStyle(camera.preset == p ? .black : .secondary)
+                }
             }
         }
-        .disabled(camera.isCapturing)
     }
 
     private var lensBar: some View {
