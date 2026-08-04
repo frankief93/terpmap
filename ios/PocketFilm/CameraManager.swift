@@ -132,12 +132,6 @@ final class CameraManager: NSObject, ObservableObject {
             session.addOutput(photoOutput)
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
-        // iOS 17+ responsive-capture stack: ring-buffer zero shutter lag, overlapped
-        // capture/processing, and adaptive pacing under rapid fire. Order matters —
-        // each tier requires the previous one.
-        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
-        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
-        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
 
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         videoOutput.alwaysDiscardsLateVideoFrames = true
@@ -147,6 +141,25 @@ final class CameraManager: NSObject, ObservableObject {
 
         session.commitConfiguration()
         updateConnections(front: false)
+        refreshCapabilities()
+
+        // Defer the heavy photo-pipeline upgrades (48MP dimensions + the responsive
+        // capture stack, a "lengthy reconfiguration" per the SDK) until after the
+        // preview is live — doing them up front costs seconds of black screen.
+        sessionQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.upgradePhotoPipeline()
+        }
+    }
+
+    private func upgradePhotoPipeline() {
+        session.beginConfiguration()
+        // iOS 17+ responsive-capture stack: ring-buffer zero shutter lag, overlapped
+        // capture/processing, and adaptive pacing under rapid fire. Order matters —
+        // each tier requires the previous one.
+        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = true }
+        if photoOutput.isResponsiveCaptureSupported { photoOutput.isResponsiveCaptureEnabled = true }
+        if photoOutput.isFastCapturePrioritizationSupported { photoOutput.isFastCapturePrioritizationEnabled = true }
+        session.commitConfiguration()
         refreshOutputDimensions()
         refreshCapabilities()
     }
@@ -281,8 +294,29 @@ final class CameraManager: NSObject, ObservableObject {
         return lenses
     }
 
+    /// Which chip should light up, based on the actual camera state — pinching
+    /// between 1x and 2x moves the highlight even though no chip was tapped.
+    var activeChip: Lens {
+        if isFrontCamera { return .wide }
+        if lens == .ultraWide { return .ultraWide }
+        return zoom >= 1.75 ? .tele2x : .wide
+    }
+
+    /// Zoom in iPhone-convention units: the ultra-wide's native 1.0 shows as 0.5x.
+    var displayZoom: Double {
+        (lens == .ultraWide ? 0.5 : 1.0) * zoom
+    }
+
     func selectLens(_ newLens: Lens) {
+        let wasUltraWide = lens == .ultraWide
         lens = newLens
+        guard !isFrontCamera else { return }
+        if !wasUltraWide && newLens != .ultraWide {
+            // 1x and 2x share the same physical camera — a zoom change, not a
+            // device swap, so it's instant.
+            setZoom(newLens == .tele2x ? 2 : 1)
+            return
+        }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.session.beginConfiguration()

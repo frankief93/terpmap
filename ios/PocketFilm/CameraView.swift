@@ -11,6 +11,9 @@ struct CameraView: View {
     @State private var showReview = false
     @State private var flashOpacity: Double = 0
     @State private var pinchBaseZoom: Double = 1
+
+    private struct Reticle { let point: CGPoint; let id: UUID }
+    @State private var reticle: Reticle?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -31,7 +34,7 @@ struct CameraView: View {
             DispatchQueue.main.async { pipeline.look = lookStore.effectiveLook }
         }
         .onChange(of: camera.lens) {
-            pinchBaseZoom = camera.lens == .tele2x ? 2 : 1
+            pinchBaseZoom = camera.zoom
         }
         .sheet(isPresented: $showReview) {
             ReviewSheet(camera: camera)
@@ -74,14 +77,36 @@ struct CameraView: View {
                                 : CGPoint(x: ny, y: 1 - nx)
                             camera.focusAndExpose(at: p)
                             Haptics.tap()
+
+                            let id = UUID()
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                reticle = Reticle(point: point, id: id)
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                                if reticle?.id == id {
+                                    withAnimation(.easeOut(duration: 0.3)) { reticle = nil }
+                                }
+                            }
                         }
                         .gesture(
                             MagnifyGesture()
                                 .onChanged { value in
                                     camera.setZoom(pinchBaseZoom * value.magnification)
                                 }
-                                .onEnded { _ in pinchBaseZoom = camera.zoom }
+                                .onEnded { _ in
+                                    pinchBaseZoom = camera.zoom
+                                    camera.lens = camera.activeChip
+                                }
                         )
+
+                    if let reticle {
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.yellow.opacity(0.9), lineWidth: 1.5)
+                            .frame(width: 74, height: 74)
+                            .position(reticle.point)
+                            .allowsHitTesting(false)
+                            .transition(.scale(scale: 1.35).combined(with: .opacity))
+                    }
                 }
 
                 if showGrid { gridOverlay }
@@ -245,16 +270,18 @@ struct CameraView: View {
     private var lensBar: some View {
         HStack(spacing: 10) {
             ForEach(camera.availableLenses) { lens in
+                let active = camera.activeChip == lens
                 Button {
                     camera.selectLens(lens)
                     Haptics.tap()
                 } label: {
-                    Text(lens.rawValue)
+                    Text(active ? zoomLabel(camera.displayZoom) : lens.rawValue)
                         .font(.footnote.weight(.semibold))
+                        .monospacedDigit()
                         .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(camera.lens == lens ? Color.orange : Color.white.opacity(0.08),
+                        .background(active ? Color.orange : Color.white.opacity(0.08),
                                     in: Capsule())
-                        .foregroundStyle(camera.lens == lens ? .black : .white)
+                        .foregroundStyle(active ? .black : .white)
                 }
             }
             Button {
@@ -270,6 +297,11 @@ struct CameraView: View {
             }
             .padding(.leading, 6)
         }
+    }
+
+    private func zoomLabel(_ z: Double) -> String {
+        let rounded = (z * 10).rounded() / 10
+        return rounded == rounded.rounded() ? "\(Int(rounded))x" : String(format: "%.1fx", rounded)
     }
 
     private func shoot() {
